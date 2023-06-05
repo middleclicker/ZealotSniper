@@ -8,6 +8,10 @@ import time
 import pyautogui as py
 import numpy as np
 import sys
+import math
+
+AIM_STEPS = 3
+SPIN_STEPS = 2
 
 def get_screen_resolution():
     monitor = get_monitors()[0]  # Assuming a single monitor setup
@@ -42,34 +46,59 @@ def generate_vectors(target, num_steps):
     return vectors
 
 def doMouseMovement(zealot):
-    #wind_mouse(center_width, center_height, zealot[0], zealot[1], move_mouse=lambda x,y: py.move(x, y))
     target_x = zealot[0]
     target_y = zealot[1]+8 # 8 pixel offset
     target_vector = [0, 0]
     target_vector[0] = target_x-center_width
     target_vector[1] = target_y-center_height
-    py.move(target_vector[0], target_vector[1])
 
-    #transitional_vectors = generate_vectors(target_vector, 1)
-    #for vector in transitional_vectors:
-    #    py.move(vector[0], vector[1])
+    transitional_vectors = generate_vectors(target_vector, AIM_STEPS)
+    for vector in transitional_vectors:
+        py.move(vector[0], vector[1])
 
     py.click(button='right')
 
+def spinAround():
+    transitional_vectors = generate_vectors((-center_width, 0), SPIN_STEPS)
+    for vector in transitional_vectors:
+        py.move(vector[0], vector[1])
+
 def runProgram(event):
+    lastCoord = (center_width, center_height)
+    continuousNoDetection = 0
+    py.keyDown('shift')
+    py.keyDown('w')
     while True:
         if keyboard.is_pressed("r"):
             sys.exit()
+        print("--------")
         im = ImageGrab.grab()
         results = model(im)
         results = results.pandas().xyxy[0]
+        closestDist = 10000
+        closestRow = {}
         for index, row in results.iterrows():
             if row['confidence'] >= 0.7:
-                print(((row['xmin']+row['xmax'])/2, (row['ymin']+row['ymax'])/2))
-                doMouseMovement(((row['xmin']+row['xmax'])/2, (row['ymin']+row['ymax'])/2))
-                #time.sleep(0.5)
-                break
-                # toShoot.append(((row['xmin']+row['xmax'])/2, (row['ymin']+row['ymax'])/2))
+                currentDist = math.sqrt(math.pow((row['xmin']+row['xmax'])/2-center_width, 2) + math.pow((row['ymin']+row['ymax'])/2-center_height, 2))
+                if currentDist < closestDist:
+                    print(row)
+                    closestRow = row.to_dict()
+                    closestDist = currentDist
+
+        if not closestRow:
+            print("Skipped because of low confidence value")
+            if continuousNoDetection > 10:
+                continuousNoDetection = 0
+                spinAround()
+            else:
+                continuousNoDetection += 1
+            continue
+
+        print(closestRow)
+        doMouseMovement(((closestRow['xmin']+closestRow['xmax'])/2, (closestRow['ymin']+closestRow['ymax'])/2))
+        lastCoord = ((closestRow['xmin']+closestRow['xmax'])/2, (closestRow['ymin']+closestRow['ymax'])/2)
+        print("Current Coordinate: ", lastCoord)
+        print("Distance from last: ", closestDist)
 
 key_to_listen = "x"
 keyboard.on_press_key(key_to_listen, runProgram)
